@@ -1,7 +1,17 @@
-# Formerly called: anthropic_filemap.yaml
-# This template is heavily inspired by anthropic's computer use demo, but you can use
-# it with any LM.
+# 优化的 GLM-4.7 配置
+# 这个配置解决了以下问题：
+# 1. 减少过度检查和验证
+# 2. 自动清理 Docker 容器
+# 3. 自动提交 PR 到 GitHub
+
 agent:
+  model:
+    model_name: "zai/glm-4.7"
+    per_instance_cost_limit: 3.0
+    temperature: 0.0
+    # 设置最大调用次数限制
+    per_instance_call_limit: 50  # 限制每个实例的最大 API 调用次数
+
   templates:
     system_template: |-
       You are a helpful assistant that can interact with a computer to solve tasks.
@@ -26,12 +36,6 @@ agent:
       Can you help me implement the necessary changes to the repository so that the requirements specified in the <pr_description> are met?
       I've already taken care of all changes to any of the test files described in the <pr_description>. This means you DON'T have to modify the testing logic or any of the tests in any way!
       Your task is to make the minimal changes to non-tests files in the {{working_dir}} directory to ensure the <pr_description> is satisfied.
-      Follow these steps to resolve the issue:
-      1. As a first step, it might be a good idea to find and read code relevant to the <pr_description>
-      2. Create a script to reproduce the error and execute it with `python <filename.py>` using the bash tool, to confirm the error
-      3. Edit the sourcecode of the repo to resolve the issue
-      4. Rerun your reproduce script and confirm that the error is fixed!
-      5. Think about edgecases and make sure your fix handles them as well
 
       EFFICIENT WORKFLOW:
       1. Quickly identify the relevant code
@@ -40,11 +44,18 @@ agent:
       4. Submit - don't over-check or run excessive tests
 
       Your thinking should be focused and concise.
+
     next_step_template: |-
       OBSERVATION:
       {{observation}}
+
+      (Note: Avoid repeating the same checks. Move forward efficiently.)
+
     next_step_no_output_template: |-
       Your command ran successfully and did not produce any output.
+      Move on to the next step efficiently.
+
+  # 简化提交审查流程
   tools:
     env_variables:
       PAGER: cat
@@ -56,29 +67,64 @@ agent:
     bundles:
       - path: tools/registry
       - path: tools/edit_anthropic
-      - path: tools/review_on_submit_m
+      # 移除 review_on_submit_m 以减少额外的检查步骤
+      # - path: tools/review_on_submit_m
     registry_variables:
       USE_FILEMAP: 'true'
+      # 简化提交消息，只保留必要的审查
       SUBMIT_REVIEW_MESSAGES:
         - |
-          Thank you for your work on this issue. Please carefully follow the steps below to help review your changes.
-
-          1. If you made any changes to your code after running the reproduction script, please run the reproduction script again.
-            If the reproduction script is failing, please revisit your changes and make sure they are correct.
-            If you have already removed your reproduction script, please ignore this step.
-          2. Remove your reproduction script (if you haven't done so already).
-          3. If you have modified any TEST files, please revert them to the state they had before you started fixing the issue.
-            You can do this with `git checkout -- /path/to/test/file.py`. Use below <diff> to find the files you need to revert.
-          4. Run the submit command again to confirm.
-
-          Here is a list of all of your changes:
-
+          Your changes look good. Please submit if you're confident the fix is correct.
           <diff>
           {{diff}}
           </diff>
     enable_bash_tool: true
     parse_function:
       type: function_calling
+
+  # 历史处理 - 限制上下文长度以提高效率
   history_processors:
     - type: cache_control
       last_n_messages: 2
+    - type: last_n_observations
+      n: 10  # 只保留最近 10 个观察，减少过度思考
+
+  # 重试循环配置 - 减少重试次数
+  retry_loop:
+    type: chooser
+    max_attempts: 2  # 最多尝试 2 次（默认是 3 次）
+    cost_limit: 3.0
+    reviewer_config:
+      type: basic
+    model:
+      model_name: "zai/glm-4.7"
+      temperature: 0.0
+
+# 环境配置
+env:
+  # 自动清理容器
+  auto_remove: true  # 任务完成后自动删除容器
+  # 或者设置为：
+  # auto_remove: false  # 保留容器用于调试
+  # cleanup_on_exit: true  # SWE-agent 退出时清理
+
+# 数据路径配置
+data: path/to/your/data  # 修改为你的数据路径
+instances: path/to/your/instances.jsonl  # 修改为你的实例文件
+
+# 输出配置
+output_dir: path/to/output  # 修改为你的输出目录
+
+# Hooks 配置
+# 问题 3：自动提交 PR
+hooks:
+  - type: open_pr
+    skip_if_commits_reference_issue: true
+    # 这个 hook 会在任务完成后自动提交 PR 到 GitHub
+    # 需要设置环境变量: export GITHUB_TOKEN=your_token
+
+# 或者使用 apply_patch hook（只应用补丁，不提交 PR）
+# hooks:
+#   - type: apply_patch
+#     repo_type: github
+#     # 这会将补丁应用到本地，但不会提交 PR

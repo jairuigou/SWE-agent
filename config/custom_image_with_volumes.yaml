@@ -1,0 +1,156 @@
+# 自定义镜像配置示例
+# 适用于：使用包含特殊依赖的自定义镜像，并需要挂载宿主机目录
+#
+# 使用方式：
+# sweagent run --problem_statement.path="path/to/issue.md" \
+#   --repo.path="/path/to/local/repo" \
+#   --repo.type=local \
+#   --config config/custom_image_with_volumes.yaml
+
+instances:
+  # 单个实例配置
+  type: single
+  problem_statement:
+    type: file
+    path: ""  # 通过命令行参数 --problem_statement.path 指定
+
+  # 仓库配置（本地仓库）
+  repo:
+    type: local
+    repo_name: test_bed
+    base_commit: ""  # 留空使用当前 HEAD
+    path: ""  # 通过命令行参数 --repo.path 指定
+
+  # 部署配置
+  deployment:
+    type: docker
+    # 使用自定义镜像（包含所有依赖项）
+    image: your-registry/your-custom-image:latest
+
+    # Docker 容器启动参数
+    docker_args:
+      # 挂载宿主机仓库目录到容器（用于挂载密码等敏感文件）
+      - "-v"
+      - "/path/to/host/repo:/workspace/repo"
+
+      # 挂载配置文件目录（包含敏感信息如密码、token等）
+      - "-v"
+      - "/path/to/secrets:/workspace/secrets:ro"  # :ro 表示只读
+
+      # 挂载缓存目录（加速构建）
+      - "-v"
+      - "/path/to/cache:/workspace/cache"
+
+      # 设置环境变量
+      - "-e"
+      - "CUSTOM_ENV_VAR=value"
+
+      # 设置工作目录
+      - "-w"
+      - "/workspace"
+
+      # 资源限制
+      - "--memory=8g"
+      - "--cpus=4"
+
+      # 网络配置
+      - "--network=host"
+
+      # 其他自定义参数
+      - "--cap-add=SYS_PTRACE"
+      - "--security-opt seccomp=unconfined"
+
+    # Python 独立目录
+    python_standalone_dir: "/root"
+
+    # 容器启动超时（秒）
+    startup_timeout: 180.0
+
+    # 镜像拉取策略: 'always', 'missing', 'never'
+    pull: "missing"
+
+    # 平台（可选，用于多架构镜像）
+    # platform: "linux/amd64"
+
+  # 启动后执行的命令（在容器内）
+  post_startup_commands:
+    # 设置环境变量
+    - "export PYTHONPATH=/workspace/repo:$PYTHONPATH"
+
+    # 激活虚拟环境（如果镜像中有）
+    - "source /root/venv/bin/activate"
+
+    # 验证依赖
+    - "python -c 'import your_special_dependency; print(\"Dependencies OK\")'"
+
+    # 设置工作目录
+    - "cd /workspace/repo"
+
+  # 启动命令超时
+  post_startup_command_timeout: 120
+
+# Agent 配置
+agent:
+  type: default
+
+  templates:
+    system_template: |-
+      你是一个有用的助手，可以与计算机交互来完成任务。
+
+      工作目录：{{working_dir}}
+      仓库已挂载在容器中，所有依赖项已预装。
+
+    instance_template: |-
+      <uploaded_files>
+      {{working_dir}}
+      </uploaded_files>
+
+      我已经上传了一个代码仓库在 {{working_dir}} 目录。
+
+      <pr_description>
+      {{problem_statement}}
+      </pr_description>
+
+      请帮助我实现必要的更改以满足 <pr_description> 中的要求。
+
+    next_step_template: |-
+      OBSERVATION:
+      {{observation}}
+
+    next_step_no_output_template: |-
+      命令成功执行，没有输出。
+
+  # 工具配置
+  tools:
+    env_variables:
+      PAGER: cat
+      MANPAGER: cat
+      LESS: -R
+      PIP_PROGRESS_BAR: 'off'
+      TQDM_DISABLE: '1'
+      GIT_PAGER: cat
+
+      # 自定义环境变量
+      CUSTOM_DIR: /workspace/secrets
+      REPO_DIR: /workspace/repo
+
+    bundles:
+      - path: tools/registry
+      - path: tools/edit_anthropic
+      - path: tools/review_on_submit_m
+
+    enable_bash_tool: true
+    parse_function:
+      type: function_calling
+
+  # 历史记录处理
+  history_processors:
+    - type: cache_control
+      last_n_messages: 2
+
+  # 模型配置
+  model:
+    name: "claude-sonnet-4-20250514"
+    api_key: $CLAUDE_API_KEY
+    temperature: 0.0
+    max_tokens: 8192

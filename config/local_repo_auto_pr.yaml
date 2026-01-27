@@ -1,0 +1,202 @@
+# 本地仓库 + 自定义镜像 + 自动 PR 配置
+#
+# 使用场景：
+# - 本地已有仓库，与 GitHub 远程仓库同步
+# - 使用自定义 Docker 镜像（包含特殊依赖）
+# - SWE-agent 直接修改本地仓库文件
+# - 自动创建 commit 并提交 PR 到 GitHub
+#
+# 运行方式：
+# sweagent run \
+#   --config config/local_repo_auto_pr.yaml \
+#   --problem_statement.github_url="https://github.com/your-org/your-repo/issues/123" \
+#   --instances.repo.path="/path/to/your/local/repo"
+
+instances:
+  # 本地仓库配置
+  repo:
+    type: local
+    repo_name: test_bed
+    path: ""  # 通过命令行 --instances.repo.path 传入
+    base_commit: ""  # 留空使用当前 HEAD，或指定具体的 commit hash
+
+  # Docker 部署配置
+  deployment:
+    type: docker
+    # 你的自定义镜像
+    image: your-registry/your-custom-image:latest
+
+    # Docker 启动参数
+    docker_args:
+      # 🔑 关键：挂载本地仓库目录到容器（读写）
+      # 这样容器的修改会直接作用于本地文件系统
+      - "-v"
+      - "/path/to/your/local/repo:/test_bed"
+
+      # 挂载敏感配置文件（只读，安全）
+      - "-v"
+      - "/home/user/.secrets:/workspace/secrets:ro"
+
+      # 挂载缓存目录（加速构建）
+      - "-v"
+      - "/tmp/build-cache:/workspace/.cache"
+
+      # 设置工作目录
+      - "-w"
+      - "/test_bed"
+
+      # 环境变量
+      - "-e"
+      - "ENVIRONMENT=development"
+
+      # 资源限制（根据你的机器调整）
+      - "--memory=16g"
+      - "--cpus=8"
+      - "--shm-size=2g"  # 共享内存，某些框架需要
+
+      # 网络配置（如果需要访问外网）
+      - "--network=host"
+
+    # Python 独立目录
+    python_standalone_dir: "/root"
+
+    # 容器启动超时（大镜像可能需要更长时间）
+    startup_timeout: 300.0
+
+    # 镜像拉取策略
+    pull: "missing"
+
+  # 容器启动后执行的初始化命令
+  post_startup_commands:
+    # 设置环境变量
+    - "export PYTHONPATH=/test_bed:$PYTHONPATH"
+
+    # 激活虚拟环境（如果你的镜像中有）
+    - "source /root/venv/bin/activate || true"
+
+    # 验证关键依赖是否可用
+    - "python -c 'import sys; print(f\"Python {sys.version}\")'"
+    - "python -c 'import your_special_lib; print(\"Dependencies OK\")' || echo 'Warning: Some dependencies missing'"
+
+    # 显示当前工作目录和 git 状态
+    - "pwd && ls -la"
+    - "git status"
+
+    # 确保在仓库目录中
+    - "cd /test_bed || cd /test_bed"
+
+  # 启动命令超时
+  post_startup_command_timeout: 120
+
+# Agent 配置
+agent:
+  type: default
+
+  templates:
+    system_template: |-
+      你是一个专业的软件开发助手，专门用于修复 GitHub issues。
+
+      重要信息：
+      - 工作目录：{{working_dir}}
+      - 你正在使用自定义开发镜像，所有特殊依赖已预装
+      - 修改会直接作用于本地文件系统
+      - 修复完成后会自动创建 PR
+
+      工作流程：
+      1. 理解 issue 需求
+      2. 快速定位相关代码
+      3. 创建必要的修改
+      4. 运行测试验证
+      5. 提交修复（使用 /submit 命令）
+
+      请高效且精准地完成任务。
+
+    instance_template: |-
+      <uploaded_files>
+      {{working_dir}}
+      </uploaded_files>
+
+      我需要你帮助修复以下 GitHub issue：
+
+      <pr_description>
+      {{problem_statement}}
+      </pr_description>
+
+      仓库已在 {{working_dir}} 目录中，所有依赖项已预装。
+
+      请按照以下步骤工作：
+      1. 快速浏览相关代码
+      2. 理解问题本质
+      3. 创建最小化的修复
+      4. 验证修复有效
+      5. 使用 /submit 命令提交（会自动创建 PR）
+
+      你的修改将直接保存到本地仓库，成功后会自动创建 commit 和 PR。
+
+    next_step_template: |-
+      OBSERVATION:
+      {{observation}}
+
+    next_step_no_output_template: |-
+      命令执行成功，没有输出。
+
+  # 工具配置
+  tools:
+    # 环境变量
+    env_variables:
+      PAGER: cat
+      MANPAGER: cat
+      LESS: -R
+      PIP_PROGRESS_BAR: 'off'
+      TQDM_DISABLE: '1'
+      GIT_PAGER: cat
+
+      # 自定义环境变量
+      REPO_DIR: /test_bed
+      SECRETS_DIR: /workspace/secrets
+
+    # 工具包
+    bundles:
+      - path: tools/registry
+      - path: tools/edit_anthropic
+      - path: tools/review_on_submit_m
+
+    # 启用 bash 工具
+    enable_bash_tool: true
+
+    # 解析函数类型
+    parse_function:
+      type: function_calling
+
+  # 历史记录处理
+  history_processors:
+    - type: cache_control
+      last_n_messages: 2
+
+  # 模型配置
+  model:
+    name: "claude-sonnet-4-20250514"
+    api_key: $CLAUDE_API_KEY
+    temperature: 0.0
+    max_tokens: 8192
+    per_instance_cost_limit: 3.0
+    per_instance_call_limit: 150
+    total_cost_limit: 100.0
+
+# Actions 配置
+actions:
+  # 🔑 启用自动 PR 创建
+  open_pr: true
+
+  # PR 配置
+  pr_config:
+    # 如果已有提交引用该 issue，则跳过 PR 创建（推荐保持 true）
+    skip_if_commits_reference_issue: true
+
+  # 是否在本地应用 patch（对于本地仓库，这个选项会自动生效）
+  apply_patch_locally: true
+
+# Hooks 配置（可选，用于更细粒度的控制）
+# hooks:
+#   - type: open_pr
+#     skip_if_commits_reference_issue: true

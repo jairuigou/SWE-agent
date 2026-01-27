@@ -1,0 +1,165 @@
+# 本地仓库 + 自定义镜像 + 自动 PR 配置（正确版本）
+#
+# 关键理解：
+# - 使用 type: preexisting，因为通过 docker_args 挂载了本地仓库
+# - github_url 仅用于 PR 创建，不影响仓库的获取方式
+# - 不指定 --env.repo.github_url，避免触发 GithubRepoConfig
+#
+# 运行方式：
+# sweagent run \
+#   --config config/local_repo_auto_pr_fixed.yaml \
+#   --problem_statement.github_url="https://github.com/your-org/your-repo/issues/123"
+
+instances:
+  # 🔑 关键：使用 preexisting 类型
+  # 这意味着：仓库已通过某种方式存在（如 docker volume mount）
+  # SWE-agent 不会上传或克隆，直接使用已挂载的目录
+  repo:
+    type: preexisting
+    repo_name: test_bed  # 容器内的目录名，必须与 docker_args 挂载路径匹配
+    base_commit: "HEAD"  # 从当前 HEAD 开始，或指定 commit hash
+    reset: false  # 🔑 重要：不重置，保留本地修改
+
+  # Docker 部署配置
+  deployment:
+    type: docker
+    image: your-registry/your-custom-image:latest
+
+    docker_args:
+      # 🔑 核心：挂载本地仓库到容器（读写）
+      # 这样容器的修改直接作用于本地文件系统
+      - "-v"
+      - "/path/to/your/local/repo:/test_bed"
+
+      # 挂载敏感配置（只读）
+      - "-v"
+      - "/home/user/.secrets:/workspace/secrets:ro"
+
+      # 挂载缓存目录
+      - "-v"
+      - "/tmp/build-cache:/workspace/.cache"
+
+      # 设置工作目录
+      - "-w"
+      - "/test_bed"
+
+      # 环境变量
+      - "-e"
+      - "ENVIRONMENT=development"
+
+      # 资源限制
+      - "--memory=16g"
+      - "--cpus=8"
+      - "--shm-size=2g"
+
+      # 网络配置
+      - "--network=host"
+
+    python_standalone_dir: "/root"
+    startup_timeout: 300.0
+    pull: "missing"
+
+  # 容器启动后执行的命令
+  post_startup_commands:
+    - "export PYTHONPATH=/test_bed:$PYTHONPATH"
+    - "source /root/venv/bin/activate || true"
+    - "python -c 'import your_special_lib; print(\"Dependencies OK\")' || echo 'Warning: Some dependencies missing'"
+    - "pwd && ls -la"
+    - "git status"
+    - "cd /test_bed"
+
+  post_startup_command_timeout: 120
+
+# Agent 配置
+agent:
+  type: default
+
+  templates:
+    system_template: |-
+      你是一个专业的软件开发助手，专门用于修复 GitHub issues。
+
+      重要信息：
+      - 工作目录：{{working_dir}}
+      - 使用自定义开发镜像，所有特殊依赖已预装
+      - 修改会直接作用于本地文件系统
+      - 修复完成后会自动创建 PR
+
+      工作流程：
+      1. 理解 issue 需求
+      2. 快速定位相关代码
+      3. 创建必要的修改
+      4. 运行测试验证
+      5. 提交修复（使用 /submit 命令）
+
+    instance_template: |-
+      <uploaded_files>
+      {{working_dir}}
+      </uploaded_files>
+
+      我需要你帮助修复以下 GitHub issue：
+
+      <pr_description>
+      {{problem_statement}}
+      </pr_description>
+
+      仓库已在 {{working_dir}} 目录中，所有依赖项已预装。
+
+      请按照以下步骤工作：
+      1. 快速浏览相关代码
+      2. 理解问题本质
+      3. 创建最小化的修复
+      4. 验证修复有效
+      5. 使用 /submit 命令提交（会自动创建 PR）
+
+      你的修改将直接保存到本地仓库，成功后会自动创建 commit 和 PR。
+
+    next_step_template: |-
+      OBSERVATION:
+      {{observation}}
+
+    next_step_no_output_template: |-
+      命令执行成功，没有输出。
+
+  tools:
+    env_variables:
+      PAGER: cat
+      MANPAGER: cat
+      LESS: -R
+      PIP_PROGRESS_BAR: 'off'
+      TQDM_DISABLE: '1'
+      GIT_PAGER: cat
+      REPO_DIR: /test_bed
+      SECRETS_DIR: /workspace/secrets
+
+    bundles:
+      - path: tools/registry
+      - path: tools/edit_anthropic
+      - path: tools/review_on_submit_m
+
+    enable_bash_tool: true
+    parse_function:
+      type: function_calling
+
+  history_processors:
+    - type: cache_control
+      last_n_messages: 2
+
+  model:
+    name: "claude-sonnet-4-20250514"
+    api_key: $CLAUDE_API_KEY
+    temperature: 0.0
+    max_tokens: 8192
+    per_instance_cost_limit: 3.0
+    per_instance_call_limit: 150
+    total_cost_limit: 100.0
+
+# Actions 配置
+actions:
+  # 🔑 启用自动 PR 创建
+  open_pr: true
+
+  pr_config:
+    skip_if_commits_reference_issue: true
+
+  # 应用 patch 到本地（对于 preexisting 类型，修改已在本地）
+  apply_patch_locally: true
