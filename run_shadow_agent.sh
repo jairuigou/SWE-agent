@@ -18,7 +18,7 @@ set -e
 # 配置变量
 CONFIG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="$CONFIG_DIR/config/shadow_code_agent_dev.yaml"
-LOCAL_REPO="/Users/jairui/repo/shadow-code-agent"
+LOCAL_REPO="/Users/cuiwenbo/repo/github-issue-agent"
 GITHUB_REPO_URL="https://github.com/jairuigou/shadow-code-agent"
 ISSUE_NUMBER="${1:-1}"
 

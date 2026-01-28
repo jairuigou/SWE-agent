@@ -17,8 +17,13 @@ instances:
   repo:
     type: preexisting
     repo_name: test_bed  # 容器内的目录名，必须与 docker_args 挂载路径匹配
-    base_commit: "HEAD"  # 从当前 HEAD 开始，或指定 commit hash
-    reset: false  # 🔑 重要：不重置，保留本地修改
+    # base_commit 可以是：
+    # - 分支名：如 "dev", "main", "feature/xxx"
+    # - 标签：如 "v0.1.0"
+    # - commit hash：如 "a4464baca1f"
+    # - "HEAD"：当前最新提交
+    base_commit: "dev"  # 🔑 指定开发分支
+    reset: false  # 🔑 重要：不重置，保留当前分支和本地修改
 
   # Docker 部署配置
   deployment:

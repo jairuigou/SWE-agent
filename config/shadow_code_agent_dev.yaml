@@ -21,33 +21,12 @@ env:
     type: docker
     image: python:3.11
 
-    # 自定义 Docker 启动参数
-    docker_args:
-      # 挂载本地仓库目录（用于开发调试）
-      - "-v"
-      - "/Users/jairui/repo/shadow-code-agent:/workspace/test_bed"
-
-      # 设置工作目录
-      - "-w"
-      - "/workspace/test_bed"
-
-      # 资源限制（根据需要调整）
-      - "--memory=8g"
-      - "--cpus=4"
-      - "--shm-size=2g"
-
     # Python 独立目录 (设置为 None 跳过构建)
     python_standalone_dir: null
 
     # 启动超时（给镜像足够启动时间）
     startup_timeout: 300.0
     pull: "missing"  # 只在本地不存在时拉取
-
-  # 容器启动后执行的初始化命令
-  post_startup_commands:
-    - "cd /workspace/test_bed"
-    - "git branch --show-current"
-    - "echo 'Working on local repository'"
 
   # 启动命令超时
   post_startup_command_timeout: 120
