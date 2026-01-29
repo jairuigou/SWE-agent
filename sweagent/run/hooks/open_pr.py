@@ -21,7 +21,7 @@ from sweagent.utils.log import get_logger
 
 
 # fixme: Bring back the ability to open the PR to a fork
-def open_pr(*, logger, token, env: SWEEnv, github_url, trajectory, _dry_run: bool = False) -> None:
+def open_pr(*, logger, token, env: SWEEnv, github_url, trajectory, base_branch: str | None = None, _dry_run: bool = False) -> None:
     """Create PR to repository
 
     Args:
@@ -98,13 +98,14 @@ def open_pr(*, logger, token, env: SWEEnv, github_url, trajectory, _dry_run: boo
     body += "\n\n" + format_trajectory_markdown(trajectory, char_limit=60_000)
     api = GhApi(token=token)
     default_branch = api.repos.get(owner, repo).default_branch
+    pr_base = base_branch or default_branch
     if not _dry_run:
         args = dict(
             owner=owner,
             repo=repo,
             title=f"SWE-agent[bot] PR to fix: {issue.title}",
             head=head,
-            base=default_branch,
+            base=pr_base,
             body=body,
             draft=True,
         )
@@ -122,6 +123,7 @@ class OpenPRConfig(BaseModel):
     # to fix the issue. Please only set this to False if you are sure the commits are
     # not fixes or if this is your own repository!
     skip_if_commits_reference_issue: bool = True
+    base_branch: str | None = None
 
 
 class OpenPRHook(RunHook):
@@ -144,6 +146,7 @@ class OpenPRHook(RunHook):
                 env=self._env,
                 github_url=self._problem_statement.github_url,
                 trajectory=result.trajectory,
+                base_branch=self._config.base_branch,
             )
 
     def should_open_pr(self, result: AgentRunResult) -> bool:
